@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- Freight Health Check v10: GitHub Pages build. v3 added ?demo=1 (internal preview with sample figures); v4 connects the Apps Script endpoint; v5 removes State and Industry, makes Business name and Postcode required; v6 adds a live completed-survey count and top 3 pain points on the start page; v7 always shows the count (0 until responses arrive); v8 animates the count and stats rolling up; v9 sizes the stat numbers to match the count; v10 loads the figures faster (preconnect, last-known figures shown instantly, shorter roll) and colours the count green and stats orange. Data: Apps Script web app (Sheet + Mailchimp). -->
+<style>:root{box-sizing:border-box}body{margin:0;padding:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Freight Health Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- v10: open connections to Apps Script (and its redirect host) while the page loads -->
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: one question per screen like a consignment checklist; a results "health report" with a gauge, category bars and three fixes. */
+:root {
+  --bg: #EEF2F1; --surface: #FFFFFF; --ink: #15212A; --muted: #5B6770; --line: #D3DBD9; --soft: #E3EAE8;
+  --accent: #1D5C96; --accent-ink: #FFFFFF;
+  --bad: #B3261E; --bad-bg: #FBE3E1; --mid: #8A5A00; --mid-bg: #F7EBCF; --good: #1E7A46; --good-bg: #DDF1E4; --warn: #C2410C;
+  /* v2: all text set in Poppins (display, body and label styles) */
+  --f-display: "Poppins", "Segoe UI", Arial, sans-serif;
+  --f-body: "Poppins", "Segoe UI", Arial, sans-serif;
+  --f-mono: "Poppins", "Segoe UI", Arial, sans-serif;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0F171D; --surface: #16212A; --ink: #E4EAEE; --muted: #97A4AD; --line: #2A3A46; --soft: #1D2B35;
+  --accent: #6FA8DC; --accent-ink: #0F171D;
+  --bad: #F2938B; --bad-bg: #43201D; --mid: #E8C26E; --mid-bg: #3A2E12; --good: #7FD3A0; --good-bg: #173A27; --warn: #FB923C; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0F171D; --surface: #16212A; --ink: #E4EAEE; --muted: #97A4AD; --line: #2A3A46; --soft: #1D2B35;
+  --accent: #6FA8DC; --accent-ink: #0F171D;
+  --bad: #F2938B; --bad-bg: #43201D; --mid: #E8C26E; --mid-bg: #3A2E12; --good: #7FD3A0; --good-bg: #173A27; --warn: #FB923C; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5 }
+.wrap { max-width: 720px; margin: 0 auto; padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 20px }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600 }
+h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(32px, 7vw, 48px); line-height: 1.02; margin: 0; text-transform: uppercase; text-wrap: balance }
+h2 { font-family: var(--f-display); font-weight: 700; font-size: 22px; margin: 0; text-wrap: balance }
+p { margin: 0 }
+.lede { font-size: 17px; color: var(--muted); max-width: 58ch }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; display: flex; flex-direction: column; gap: 16px }
+.cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px }
+.cat { border-top: 3px solid var(--accent); padding-top: 8px; display: flex; flex-direction: column; gap: 2px }
+.cat b { font-weight: 600 } .cat span { color: var(--muted); font-size: 13.5px }
+.btn { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 11px 18px; border-radius: var(--r); cursor: pointer; display: inline-flex; align-items: center; gap: 8px }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+.btn:disabled { opacity: .45; cursor: not-allowed }
+.btn:focus-visible, .opt:focus-within { outline: 2px solid var(--accent); outline-offset: 2px }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center }
+.small { font-size: 13px; color: var(--muted) }
+/* lead form */
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+.f { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.f label { font-size: 13px; font-weight: 600 }
+.f input, .f select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 9px 11px; width: 100% }
+.f input:focus-visible, .f select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px }
+.f .req { color: var(--bad) }
+.consent { font-size: 13px; color: var(--muted) }
+/* v6: start-page social proof */
+.proof .count { font-size: 15px } .proof .count b { font-family: var(--f-display); font-size: 22px; color: var(--good) } /* v10: green */
+.proof .roll { font-variant-numeric: tabular-nums; font-size: inherit; color: inherit } /* v9: stops .cat span (13.5px muted) shrinking the numbers */
+.proof .stat b { font-family: var(--f-display); font-weight: 700; font-size: 22px; line-height: 1.2; color: var(--warn) } /* v9: same size as the survey count; v10: orange to flag the issue */
+.demo { background: var(--mid-bg); color: var(--mid); font-size: 13px; text-align: center; padding: 8px 16px }
+/* question */
+.prog { display: flex; flex-direction: column; gap: 6px }
+.prog .meta { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-family: var(--f-mono) }
+.track { height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden }
+.track i { display: block; height: 100%; background: var(--accent); transition: width .25s }
+.qcat { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.q { font-family: var(--f-display); font-weight: 700; font-size: clamp(22px, 4.5vw, 28px); line-height: 1.15; text-wrap: balance }
+.opts { display: flex; flex-direction: column; gap: 8px }
+.opt { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; cursor: pointer; background: var(--surface) }
+.opt:hover { border-color: var(--accent) }
+.opt input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0 }
+.opt.sel { border-color: var(--accent); background: var(--soft) }
+.opt { position: relative; overflow: hidden }
+.opt .lab { position: relative; flex: 1; min-width: 0 }
+.opt .pc { position: relative; font-family: var(--f-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums }
+.opt .fill { position: absolute; inset: 0 auto 0 0; background: var(--soft); transition: width .35s }
+.opt.sel .fill { background: color-mix(in srgb, var(--accent) 16%, transparent) }
+.opt.sel .pc { color: var(--accent); font-weight: 600 }
+.opt input { position: relative }
+.live { font-size: 14px; padding: 10px 12px; border-radius: var(--r); background: var(--soft) }
+.live b { color: var(--accent) }
+/* results */
+.result { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 22px; align-items: center }
+.gauge { width: 100%; max-width: 200px; aspect-ratio: 1 }
+.gauge text { font-family: var(--f-display); font-weight: 800 }
+.tier { display: inline-block; font-weight: 600; padding: 3px 10px; border-radius: 99px; font-size: 14px; width: fit-content }
+.tier.bad { background: var(--bad-bg); color: var(--bad) } .tier.mid { background: var(--mid-bg); color: var(--mid) } .tier.good { background: var(--good-bg); color: var(--good) }
+.bars { display: flex; flex-direction: column; gap: 10px }
+.bar { display: grid; grid-template-columns: 150px minmax(0, 1fr) 54px; gap: 10px; align-items: center; font-size: 14px }
+.bar .tr { height: 10px; background: var(--soft); border-radius: 5px; overflow: hidden }
+.bar .fi { display: block; height: 100%; border-radius: 5px }
+.bar .v { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums }
+.fixes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; counter-reset: fx }
+.fixes li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; counter-increment: fx }
+.fixes li::before { content: counter(fx); font-family: var(--f-display); font-weight: 800; font-size: 20px; color: var(--accent); line-height: 1.2 }
+.fixes b { display: block }
+.cta { border: 2px solid var(--accent) }
+.mail { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden }
+.mhead { background: var(--soft); padding: 10px 14px; font-size: 13px; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 8px }
+.mhead span:nth-child(odd) { color: var(--muted) }
+.mbody { padding: 18px; display: flex; flex-direction: column; gap: 14px; font-size: 14px }
+.mtable-wrap { overflow-x: auto }
+.mtable { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 520px }
+.mtable th { text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line) }
+.mtable td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--soft); vertical-align: top }
+.mtable td.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap }
+.mtable tr.sec td { font-weight: 600; padding-top: 12px; color: var(--accent); border-bottom: 0 }
+.minibar { display: inline-block; vertical-align: middle; width: 60px; height: 6px; background: var(--soft); border-radius: 3px; margin-left: 6px; overflow: hidden }
+.minibar i { display: block; height: 100%; background: var(--accent) }
+.mfoot { font-size: 12px; color: var(--muted); border-top: 1px solid var(--soft); padding-top: 10px }
+.sig { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px }
+.sig li::marker { color: var(--bad) }
+.note { border: 1px dashed var(--line); border-radius: var(--r); padding: 14px 16px; font-size: 13.5px; color: var(--muted); display: flex; flex-direction: column; gap: 6px }
+.note b { color: var(--ink) }
+.note table { border-collapse: collapse; width: 100% } .note td { padding: 3px 0; border-bottom: 1px solid var(--soft); vertical-align: top } .note td:last-child { text-align: right; font-family: var(--f-mono); color: var(--ink) }
+@media (max-width: 560px) {
+  .form { grid-template-columns: 1fr }
+  .result { grid-template-columns: 1fr; justify-items: center; text-align: center }
+  .result > div { display: flex; flex-direction: column; align-items: center }
+  .bar { grid-template-columns: 1fr 48px; } .bar .tr { grid-column: 1 / -1; grid-row: 2 }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+</head>
+<body>
+<div class="demo" id="demoBar" hidden>Demo mode: sample figures, nothing is saved.</div>
+<main class="wrap" id="app"></main>
+
+<script>
+const CATS = [
+  { name: 'Cost Control', blurb: 'Are you paying the best price on every shipment?' },
+  { name: 'Service & Reliability', blurb: 'What happens when your carrier lets you down?' },
+  { name: 'Reach & Capability', blurb: 'Can you send anything, anywhere, from one account?' }
+];
+// [category, question, options [label, points], fix title, fix body, single-carrier signal shown in results]
+const Q = [
+  [0, 'Do you think you get good value for money when shipping parcels or pallets within Australia?', [['Yes, good value', 5], ['Mostly', 3], ['No, it feels expensive', 0], ['I’m not sure', 1]],
+    'Check you’re getting good value', 'No single carrier is cheapest on every route, weight and size. A multi-carrier platform compares parcel and pallet prices across carriers for each shipment, so you know you’re getting good value.',
+    'You’re not sure you get good value on domestic freight'],
+  [0, 'Do you look for prices from more than one carrier when sending a shipment?', [['Every time', 5], ['Sometimes', 3], ['Never', 0], ['I’d like to', 0]],
+    'Compare quotes on every booking', 'The cheapest carrier changes with weight, size and destination. A multi-carrier platform shows the quotes side by side so you pick the best one each time.',
+    'You don’t compare prices before booking'],
+  [0, 'Has your freight bill gone up in the last 12 months?', [['No', 5], ['A little', 3], ['Yes, noticeably', 0], ['Not sure', 1]],
+    'Benchmark your rates', 'When your only carrier raises its rates, you have no alternative ready. Comparing your last 10 consignments across carriers shows what you should be paying.',
+    'Your freight costs are rising'],
+  [0, 'Do you get surcharges on your invoices that you didn’t expect?', [['Never', 5], ['Occasionally', 3], ['Often', 0]],
+    'Stop surprise surcharges', 'Quotes that include fuel, residential and oversize charges before you book mean the invoice matches the price you chose.',
+    'Surcharges catch you out'],
+  [0, 'If an invoice comes in higher than you were quoted, do you claim the difference back?', [['Yes', 2], ['No', 0]],
+    'Claim back every overcharge', 'Overcharges add up. When quotes include surcharges and someone checks each invoice against the quote, differences are picked up and claimed for you.',
+    'Overcharges on invoices aren’t claimed back'],
+  [0, 'How long does it usually take for the credit to come through?', [['1–3 days', 3], ['4–7 days', 2], ['8–15 days', 1], ['More than 15 days', 0]],
+    'Get overcharge credits sorted faster', 'A local account manager who chases the carrier for you means credits are resolved in days, not weeks.',
+    'Overcharge credits take more than a week'],
+  [1, 'If your carrier has a delay or a strike, could you send tomorrow’s orders with another carrier?', [['Yes, easily', 5], ['With some effort', 2], ['No', 0]],
+    'Have a backup carrier ready', 'On a multi-carrier platform the backup is already set up. When one carrier has problems, you book the next shipment with another.',
+    'You have no backup when your carrier has problems'],
+  [1, 'In the last month, has a customer complained about a late or damaged delivery?', [['No', 5], ['Once', 3], ['More than once', 0]],
+    'Match the carrier to the freight', 'Each carrier is strong on some freight and weak on others. Choosing per shipment cuts damage and delays.',
+    'Customers have complained about deliveries'],
+  [1, 'If you’ve had a lost or damaged shipment, how much effort went into resolving it with the carrier?', [['1 call', 5], ['2–3 calls', 3], ['4–5 calls', 1], ['More than 5 calls', 0]],
+    'Hand claims to someone who chases them', 'With a local account manager on a multi-carrier platform, one call starts the claim and they chase the carrier for you until it’s resolved.',
+    'Lost or damaged freight takes several calls to resolve'],
+  [1, 'When a delivery goes wrong, can you reach a real person who fixes it?', [['Always', 5], ['Usually', 3], ['Rarely – it’s a call centre', 0]],
+    'Get a local person to call', 'A local account manager who chases every carrier for you saves hours on each problem delivery.',
+    'Problems go to a call centre'],
+  [1, 'Can you track every shipment, from every carrier, in one place?', [['Yes', 5], ['Only some', 3], ['No', 0]],
+    'Track everything in one place', 'One tracking screen for all carriers cuts down "where is my order?" calls from customers.',
+    'Tracking is split or missing'],
+  [2, 'Can one account handle parcels, pallets and bulky items?', [['Yes', 5], ['We use separate carriers', 2], ['We struggle with big items', 0], ['We only send parcels', 5]],
+    'Book every size from one account', 'A multi-carrier platform covers satchels to pallets, so you don’t need to find a new carrier for big items.',
+    'Big items need a different carrier'],
+  [2, 'Can you send internationally from the same account?', [['Yes', 5], ['We use a separate account', 2], ['No', 0], ['Not needed', 5]],
+    'Add international to the same account', 'International express services sit alongside domestic carriers, with customs paperwork handled in one place.',
+    'International needs a separate setup'],
+  [2, 'How many logins and invoices do you deal with for freight?', [['One', 5], ['Two or three', 2], ['Many', 0]],
+    'One login, one invoice', 'A multi-carrier platform gives you the choice of many carriers with one login and one consolidated invoice.',
+    'Admin is spread across several accounts'],
+  [1, 'Do you have ready access to an account manager with your carrier or shipping platform provider?', [['Yes, a named person I can call', 5], ['Yes, but they’re hard to reach', 2], ['No, just a call centre or online form', 0], ['Not sure', 1]],
+    'Get a local account manager', 'A named local account manager who knows your freight answers the phone, sorts problems and reviews your rates with you.',
+    'No account manager you can easily reach']
+];
+const QUAL = [
+  ['About how many shipments do you send a week?', ['1–5', '6–20', '21–100', '100+']],
+  ['Where do you mostly send?', ['Local', 'Local & Interstate', 'International', 'All of the above']],
+  ['Who books your freight today?', ['Me', 'Someone in my team', 'Our warehouse', 'It’s outsourced']]
+];
+const TIERS = [
+  [0, 'Freight Leaking', 'bad', 'Your answers show a business tied to one carrier’s prices and service. That almost always means paying more than necessary.',
+    'See what your freight should cost', 'We’ll compare your last 10 consignments across several carriers and show you the difference. Your account manager will call within 24 hours.'],
+  [55, 'Room to Improve', 'mid', 'You have strong foundations, but your answers show you’re missing out on carrier choice. That’s usually where the savings are.',
+    'Get a free multi-carrier rate comparison', 'Send us your last 10 consignments and we’ll show you a side-by-side comparison across carriers. Your account manager will be in touch within 3 days.'],
+  [80, 'Freight Fit', 'good', 'Your freight is in good shape. Check your rates against the market once a year to keep it that way.',
+    'Get an annual benchmark', 'We’ll compare your rates across carriers once a year and send you a short report, no obligation.']
+];
+// v6: "pain point" answers per question, used for the start-page stats.
+// [question index, option indexes that signal a need for a multi-carrier service, phrase completing "X% …"].
+// Q6 (credit turnaround) is left out: it is only asked of businesses that claim overcharges back,
+// so its percentage would have a different base from the headline count.
+const NEED = [
+  [0, [2, 3], 'can’t say they get good value on domestic freight'],
+  [1, [2, 3], 'don’t compare carrier prices before booking'],
+  [2, [2], 'saw their freight bill rise noticeably in the last 12 months'],
+  [3, [2], 'often find unexpected surcharges on their invoices'],
+  [4, [1], 'don’t claim back invoice overcharges'],
+  [6, [1, 2], 'couldn’t easily switch carriers during a delay or strike'],
+  [7, [1, 2], 'had a customer complain about a late or damaged delivery last month'],
+  [8, [2, 3], 'needed 4 or more calls to resolve a lost or damaged shipment'],
+  [9, [2], 'rarely reach a real person when a delivery goes wrong'],
+  [10, [1, 2], 'can’t track every shipment from every carrier in one place'],
+  [11, [1, 2], 'can’t handle parcels, pallets and bulky items on one account'],
+  [12, [1, 2], 'can’t send internationally from the same account'],
+  [13, [1, 2], 'juggle more than one freight login and invoice'],
+  [14, [1, 2], 'can’t easily reach an account manager']
+];
+const WHY = [
+  ['Compare every shipment', 'See quotes from several carriers and book the best price for each parcel, carton or pallet.'],
+  ['A backup when a carrier fails', 'Delays, strikes and price rises stop being your problem. You switch carriers on the next booking.'],
+  ['One login, one invoice', 'Domestic, international, pallets and same-day in one account, with a local person to call.']
+];
+
+const S = { step: 'intro', i: 0, ans: Array(Q.length).fill(null), qual: Array(QUAL.length).fill(null), lead: { name: '', biz: '', email: '', phone: '', pc: '', state: '', ind: '' } };
+// ---- Backend (Google Apps Script web app) ----
+// Paste the deployed web app URL here (ends in /exec). Left empty, the page still runs:
+// live % stays hidden and nothing is sent.
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbyXeTIPyuW1HZ_TbpuhorDlCOZNvNIa4EpzXOpM2nMCX7nT2SMIPz99MHOKG-GNnS4/exec';
+// Contract with Code.gs:
+//   GET  ?action=counts            -> { counts: [[n per option] per question] }  (19 arrays, Q then QUAL)
+//   GET  ?action=prefill&id=UNIQID -> { lead: {name,biz,email,phone,pc,state,ind} }
+//   GET  ?action=report&r=RID      -> { lead: {name,biz}, ans: [...], qual: [...] }
+//   POST {action:'submit', ...}    -> one Sheet row + Mailchimp upsert
+//   POST {action:'cta', rid}       -> flags the response as a CTA request
+// POSTs use Content-Type text/plain so the browser sends them without a CORS preflight.
+// Live % is shown on a question only once it has this many real responses (excluding the current respondent).
+const MIN_SHOW = 5;
+const P = new URLSearchParams(location.search);
+// ?demo=1 is for internal previews only: sample figures of 5 per answer, no backend calls, nothing saved.
+// Links sent to prospects never include it.
+const DEMO = P.get('demo') === '1';
+const DEMO_SEED = 5;
+// Mailchimp *|UNIQID|* from the campaign link; identifies the recipient even if they type a different email.
+S.mcid = (P.get('id') || '').slice(0, 64);
+S.src = (P.get('src') || (S.mcid ? 'mailchimp' : 'direct')).slice(0, 40);
+const newRid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+S.rid = newRid();
+const qmax = q => Math.max(...q[2].map(o => o[1]));
+const MAXP = Q.reduce((a, q) => a + qmax(q), 0);
+// Health Score scale: nobody scores below FLOOR %. Score = FLOOR + (100 - FLOOR) x share of points earned.
+const FLOOR = 30;
+const scaled = (v, m) => Math.round(FLOOR + (100 - FLOOR) * (m ? v / m : 0));
+const CATMAX = CATS.map((c, ci) => Q.filter(q => q[0] === ci).reduce((a, q) => a + qmax(q), 0));
+// Follow-up questions: only shown when the condition is true (index into Q).
+const SHOWIF = { 5: () => S.ans[4] === 0 }; // credit time only if they claim overcharges back
+const shown = n => !SHOWIF[n] || SHOWIF[n]();
+function nextQ(i) { let j = i + 1; while (j < TOTAL && !shown(j)) { skip(j); j++; } return j; }
+function prevQ(i) { let j = i - 1; while (j >= 0 && !shown(j)) j--; return j; }
+function skip(j) { if (S.committed[j] !== null) { COUNTS[j][S.committed[j]]--; S.committed[j] = null; saveCounts(); } if (j < Q.length) S.ans[j] = null; else S.qual[j - Q.length] = null; }
+const optCount = n => n < Q.length ? Q[n][2].length : QUAL[n - Q.length][1].length;
+const zeroCounts = () => Array.from({ length: Q.length + QUAL.length }, (_, n) => Array(optCount(n)).fill(0));
+// Real response counts from the Sheet. Starts at zero; replaced once the backend answers.
+// A malformed reply is ignored silently (keeps zeros, so live % stays hidden rather than wrong).
+let COUNTS = DEMO ? zeroCounts().map(a => a.map(() => DEMO_SEED)) : zeroCounts();
+// v6: last counts received from the Sheet, used for the start-page count and stats.
+let SRV = DEMO ? COUNTS.map(a => a.slice()) : null;
+// v10: last figures received are kept in this browser and shown instantly on the next visit,
+// then replaced (rolling) by the fresh figures a moment later. Used only for the start-page block,
+// never for the live % on questions. Storage failures are ignored.
+const CKEY = 'fhc_counts_cache_v1';
+if (!DEMO) { try { const c = JSON.parse(localStorage.getItem(CKEY) || 'null'); if (validCounts(c)) SRV = c; } catch (e) { } }
+function validCounts(c) { return Array.isArray(c) && c.length === Q.length + QUAL.length && c.every((a, n) => Array.isArray(a) && a.length === optCount(n) && a.every(v => Number.isInteger(v) && v >= 0)); }
+function api(params) {
+  if (!ENDPOINT || DEMO) return Promise.reject(new Error('no endpoint'));
+  return fetch(ENDPOINT + '?' + new URLSearchParams(params), { redirect: 'follow' }).then(r => r.json());
+}
+function post(body) {
+  if (!ENDPOINT || DEMO) return Promise.reject(new Error('no endpoint'));
+  return fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' }).then(r => r.json());
+}
+function loadCounts() {
+  if (DEMO) return Promise.resolve();
+  return api({ action: 'counts' }).then(d => {
+    if (!validCounts(d && d.counts)) return;
+    SRV = d.counts.map(a => a.slice());
+    try { localStorage.setItem(CKEY, JSON.stringify(SRV)); } catch (e) { }
+    // Keep this respondent's in-progress answers on top of the fresh server figures.
+    COUNTS = d.counts.map((a, n) => a.map((v, k) => v + (S.committed[n] === k ? 1 : 0)));
+  }).catch(() => { });
+}
+S.committed = Array(Q.length + QUAL.length).fill(null);
+function saveCounts() { } // v2: counts are held in memory only; the Sheet is the source of truth.
+function commit(n) {
+  const k = n < Q.length ? S.ans[n] : S.qual[n - Q.length];
+  if (k === null || S.committed[n] === k) return;
+  if (S.committed[n] !== null) COUNTS[n][S.committed[n]]--;
+  COUNTS[n][k]++; S.committed[n] = k; saveCounts();
+}
+// Figures shown as if this respondent's answer k is included.
+function showLive(n, k) {
+  const base = COUNTS[n].slice();
+  if (S.committed[n] !== null) base[S.committed[n]]--;
+  const others = base.reduce((a, b) => a + b, 0);
+  const live = document.getElementById('live');
+  // Too few real responses yet: show nothing rather than misleading figures.
+  if (others < MIN_SHOW) { live.hidden = true; return; }
+  base[k]++;
+  const tot = others + 1;
+  const pct = v => (100 * v / tot).toFixed(1);
+  app.querySelectorAll('.opt').forEach((o, j) => {
+    o.querySelector('.fill').style.width = pct(base[j]) + '%';
+    o.querySelector('.pc').textContent = pct(base[j]) + '%';
+  });
+  live.hidden = false;
+  live.innerHTML = base[k] > 1
+    ? `<b>${pct(base[k])}%</b> of businesses answered the same as you (${base[k]} of ${tot}).`
+    : `You’re the first to give this answer. <b>${pct(base[k])}%</b> of ${tot} responses.`;
+}
+const app = document.getElementById('app');
+if (DEMO) document.getElementById('demoBar').hidden = false;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TOTAL = Q.length + QUAL.length;
+
+// v6: completed surveys = responses to Q1 (every completed survey answers it; retakes by the same
+// email replace the earlier one server-side, so each business counts once).
+// v7: the count line always shows. It reads 0 until the Sheet counts arrive (and stays 0 if they
+// can't be loaded); the 3 stats appear only once there is at least one completed survey.
+function proofHtml() {
+  const total = SRV ? SRV[0].reduce((a, b) => a + b, 0) : 0;
+  const stats = total < 1 ? [] : NEED.map(([n, opts, text], order) => {
+    const base = SRV[n].reduce((a, b) => a + b, 0);
+    const hit = opts.reduce((a, k) => a + SRV[n][k], 0);
+    return { pct: base ? Math.round(100 * hit / base) : 0, text, order };
+  }).filter(x => x.pct > 0).sort((a, b) => b.pct - a.pct || a.order - b.order).slice(0, 3);
+  return `<div class="card proof">
+    <p class="count"><b>${roll('count', total)}</b> ${total === 1 ? 'business has' : 'businesses have'} taken the check so far.</p>
+    ${stats.length ? `<div class="cats">${stats.map(x => `<div class="cat stat"><b>${roll(x.text, x.pct)}%</b><span>${esc(x.text)}</span></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+// v8: roll-up animation. Each number starts from the value last shown for it (0 the first time)
+// and eases to its live value. Skipped for visitors with reduced motion turned on.
+const SHOWN = {};
+const roll = (key, to) => `<span class="roll" data-key="${esc(key)}" data-to="${to}">${(key in SHOWN ? SHOWN[key] : 0).toLocaleString('en-AU')}</span>`;
+function animateProof() {
+  const els = app.querySelectorAll('#proof .roll');
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  els.forEach(el => {
+    const key = el.dataset.key, to = +el.dataset.to, from = key in SHOWN ? SHOWN[key] : 0;
+    SHOWN[key] = to;
+    if (still || from === to) { el.textContent = to.toLocaleString('en-AU'); return; }
+    const t0 = performance.now(), dur = 600; // v10: was 1200ms
+    const step = now => {
+      const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (to - from) * e).toLocaleString('en-AU');
+      if (p < 1 && el.isConnected) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+function updateProof() { const el = document.getElementById('proof'); if (el) { el.innerHTML = proofHtml(); animateProof(); } }
+function intro() {
+  return `<div class="eyebrow">Freight Health Check · 3 minutes</div>
+  <h1>Is one carrier costing you more than it should?</h1>
+  <p class="lede">Answer ${Q.length} quick questions and get your Freight Health Score, with three ways to cut cost and delays.</p>
+  <div id="proof">${proofHtml()}</div>
+  <div class="card">
+    <h2>What we check</h2>
+    <div class="cats">${CATS.map(c => `<div class="cat"><b>${c.name}</b><span>${c.blurb}</span></div>`).join('')}</div>
+    <div class="row"><button class="btn primary" id="go" type="button">Start the check</button><span class="small">${Q.length} questions, plus ${QUAL.length} about your business</span></div>
+  </div>`;
+}
+function form() {
+  const L = S.lead;
+  return `<div class="eyebrow">Before we start</div>
+  <h2>Where should we send your report?</h2>
+  <form class="card" id="lf" novalidate>
+    <div class="form">
+      <div class="f"><label for="ln">Your name <span class="req">*</span></label><input id="ln" value="${esc(L.name)}" autocomplete="name" required></div>
+      <div class="f"><label for="lb">Business name <span class="req">*</span></label><input id="lb" value="${esc(L.biz)}" autocomplete="organization" required></div>
+      <div class="f"><label for="le">Email <span class="req">*</span></label><input id="le" type="email" value="${esc(L.email)}" autocomplete="email" required></div>
+      <div class="f"><label for="lph">Phone</label><input id="lph" type="tel" value="${esc(L.phone)}" autocomplete="tel" inputmode="tel"></div>
+      <div class="f"><label for="lp">Postcode <span class="req">*</span></label><input id="lp" value="${esc(L.pc)}" inputmode="numeric" maxlength="4" autocomplete="postal-code" required></div>
+    </div>
+    <p class="consent">We’ll email your Freight Health Report. By continuing you agree to receive emails from World Options Australia. You can unsubscribe at any time.</p>
+    <div class="row"><button class="btn primary" type="submit">Continue</button><span class="small" id="lerr"></span></div>
+  </form>`;
+}
+function question() {
+  const n = S.i, isQ = n < Q.length;
+  const [cat, text, opts] = isQ ? [CATS[Q[n][0]].name, Q[n][1], Q[n][2].map(o => o[0])] : ['About your business', QUAL[n - Q.length][0], QUAL[n - Q.length][1]];
+  const cur = isQ ? S.ans[n] : S.qual[n - Q.length];
+  return `<div class="prog"><div class="meta"><span>Question ${n + 1} of ${TOTAL}</span><span>${Math.round(100 * n / TOTAL)}%</span></div><div class="track"><i style="width:${100 * n / TOTAL}%"></i></div></div>
+  <div class="card">
+    <div class="qcat">${esc(cat)}</div>
+    <div class="q" id="qt">${esc(text)}</div>
+    <div class="opts" role="radiogroup" aria-labelledby="qt">
+      ${opts.map((o, k) => `<label class="opt${cur === k ? ' sel' : ''}"><span class="fill"></span><input type="radio" name="o" id="o${n}_${k}" value="${k}"${cur === k ? ' checked' : ''}><span class="lab">${esc(o)}</span><span class="pc"></span></label>`).join('')}
+    </div>
+    <div class="live" id="live" hidden aria-live="polite"></div>
+    <div class="row"><button class="btn" id="back" type="button">Back</button><button class="btn primary" id="next" type="button"${cur === null ? ' disabled' : ''}>${n === TOTAL - 1 ? 'See my score' : 'Next'}</button></div>
+  </div>`;
+}
+// "How you compare": each answer against all real responses. Figures below MIN_SHOW responses show as "–".
+function compareCard() {
+  const row = (n, text, opts, k) => {
+    if (k === null) return `<tr><td>${esc(text)}</td><td>Not asked</td><td class="n">–</td><td>–</td></tr>`;
+    const c = COUNTS[n], tot = c.reduce((a, b) => a + b, 0);
+    if (tot - 1 < MIN_SHOW) return `<tr><td>${esc(text)}</td><td>${esc(opts[k])}</td><td class="n">–</td><td>–</td></tr>`;
+    const top = c.indexOf(Math.max(...c)), same = 100 * c[k] / tot;
+    return `<tr><td>${esc(text)}</td><td>${esc(opts[k])}</td>
+      <td class="n">${same.toFixed(1)}%<span class="minibar"><i style="width:${same}%"></i></span></td>
+      <td>${esc(opts[top])} <span class="small">(${(100 * c[top] / tot).toFixed(0)}%)</span></td></tr>`;
+  };
+  let rows = '';
+  CATS.forEach((cn, ci) => {
+    rows += `<tr class="sec"><td colspan="4">${cn.name}</td></tr>`;
+    Q.forEach((q, n) => { if (q[0] === ci) rows += row(n, q[1], q[2].map(o => o[0]), S.ans[n]); });
+  });
+  rows += `<tr class="sec"><td colspan="4">About your business</td></tr>`;
+  QUAL.forEach((q, j) => rows += row(Q.length + j, q[0], q[1], S.qual[j]));
+  return `<div class="card"><h2>How you compare</h2>
+    <p class="small">Your answers against other businesses that have taken the check.</p>
+    <div class="mtable-wrap"><table class="mtable">
+      <tr><th>Question</th><th>Your answer</th><th>Answered the same</th><th>Most common answer</th></tr>
+      ${rows}
+    </table></div></div>`;
+}
+function gauge(pct, cls) {
+  const r = 80, c = 2 * Math.PI * r, f = c * pct / 100;
+  return `<svg class="gauge" viewBox="0 0 200 200" role="img" aria-label="Score ${pct} percent">
+    <circle cx="100" cy="100" r="${r}" fill="none" stroke="var(--soft)" stroke-width="18"/>
+    <circle cx="100" cy="100" r="${r}" fill="none" stroke="var(--${cls})" stroke-width="18" stroke-linecap="round" stroke-dasharray="${f} ${c}" transform="rotate(-90 100 100)"/>
+    <text x="100" y="112" text-anchor="middle" font-size="52" fill="var(--ink)">${pct}%</text>
+    <text x="100" y="138" text-anchor="middle" font-size="13" fill="var(--muted)" style="font-family:var(--f-mono);font-weight:500">HEALTH SCORE</text></svg>`;
+}
+function results() {
+  const pts = Q.map((q, k) => S.ans[k] === null ? 0 : q[2][S.ans[k]][1]);
+  const total = pts.reduce((a, b) => a + b, 0), pct = scaled(total, MAXP);
+  const cat = CATS.map((c, ci) => pts.filter((_, k) => Q[k][0] === ci).reduce((a, b) => a + b, 0));
+  const t = TIERS.filter(x => pct >= x[0]).pop();
+  const cp = cat.map((v, ci) => v / CATMAX[ci]); const hi = cp.indexOf(Math.max(...cp)), lo = cp.indexOf(Math.min(...cp));
+  const signals = Q.map((q, k) => ({ p: pts[k], s: q[5], k })).filter(x => (S.ans[x.k] !== null) && x.p / qmax(Q[x.k]) <= 0.4);
+  const dep = signals.length >= 6 ? ['High', 'bad'] : signals.length >= 3 ? ['Medium', 'mid'] : ['Low', 'good'];
+  const fixes = Q.map((q, k) => ({ k, p: pts[k], r: pts[k] / qmax(q), title: q[3], body: q[4] })).filter(x => S.ans[x.k] !== null && x.r < 1).sort((a, b) => a.r - b.r || a.k - b.k).slice(0, 3);
+  const col = (v, m) => scaled(v, m) < TIERS[1][0] ? 'bad' : scaled(v, m) < TIERS[2][0] ? 'mid' : 'good';
+  // Kept for the submission payload (Sheet row + Mailchimp fields).
+  S.calc = { pct, raw: total, max: MAXP, tier: t[1], cats: CATS.map((c, ci) => scaled(cat[ci], CATMAX[ci])), risk: dep[0], signals: signals.length, fixes: fixes.map(f => f.title + '. ' + f.body) };
+  return `<div class="eyebrow">Your Freight Health Report${S.lead.biz ? ' · ' + esc(S.lead.biz) : ''}</div>
+  <div class="card result">
+    ${gauge(pct, t[2])}
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <span class="tier ${t[2]}">${t[1]}</span>
+      <h2>${S.lead.name ? esc(S.lead.name.split(' ')[0]) + ', y' : 'Y'}our Freight Health Score is ${pct}%.</h2>
+      <p>${t[3]}</p>
+      ${hi !== lo ? `<p class="small">Strongest area: <b>${CATS[hi].name}</b> (${scaled(cat[hi], CATMAX[hi])}%). Biggest opportunity: <b>${CATS[lo].name}</b> (${scaled(cat[lo], CATMAX[lo])}%).</p>` : ''}
+    </div>
+  </div>
+  <div class="card"><h2>Your score by area</h2>
+    <div class="bars">${CATS.map((c, ci) => `<div class="bar"><span>${c.name}</span><span class="tr"><span class="fi" style="width:${scaled(cat[ci], CATMAX[ci])}%;background:var(--${col(cat[ci], CATMAX[ci])})"></span></span><span class="v">${scaled(cat[ci], CATMAX[ci])}%</span></div>`).join('')}</div>
+  </div>
+  ${fixes.length ? `<div class="card"><h2>${fixes.length === 3 ? 'Three' : fixes.length === 2 ? 'Two' : 'One'} way${fixes.length > 1 ? 's' : ''} to improve</h2>
+    <ol class="fixes">${fixes.map(f => `<li><div><b>${f.title}</b>${f.body}</div></li>`).join('')}</ol></div>` : ''}
+  <div class="card"><div class="row" style="justify-content:space-between"><h2>Single-carrier risk</h2><span class="tier ${dep[1]}">${dep[0]}</span></div>
+    ${signals.length ? `<p>${signals.length} of your ${Q.length} answers point to a business that depends on one carrier:</p><ul class="sig">${signals.map(x => `<li>${esc(x.s)}</li>`).join('')}</ul>` : '<p>Your answers show you already have carrier choice. Keep benchmarking to make the most of it.</p>'}
+  </div>
+  <div class="card"><h2>Why businesses move to a multi-carrier platform</h2>
+    <div class="cats">${WHY.map(w => `<div class="cat"><b>${w[0]}</b><span>${w[1]}</span></div>`).join('')}</div>
+  </div>
+  <div class="card cta"><h2>${t[4]}</h2><p>${t[5]}</p><div class="row"><button class="btn primary" type="button" id="ctaBtn">${t[4]}</button><span class="small" id="ctaMsg"></span></div></div>
+  ${compareCard()}
+  <div class="row"><button class="btn" id="again" type="button">Take it again</button></div>`;
+}
+function render() {
+  app.innerHTML = S.step === 'intro' ? intro() : S.step === 'form' ? form() : S.step === 'q' ? question() : results();
+  window.scrollTo(0, 0);
+  if (S.step === 'intro') {
+    animateProof();
+    document.getElementById('go').onclick = () => { S.step = 'form'; render(); };
+  }
+  if (S.step === 'form') document.getElementById('lf').onsubmit = e => {
+    e.preventDefault();
+    const v = id => document.getElementById(id).value.trim();
+    // v5: State and Industry no longer asked; kept as blanks so the Sheet columns and backend payload stay unchanged.
+    S.lead = { name: v('ln'), biz: v('lb'), email: v('le'), phone: v('lph'), pc: v('lp'), state: '', ind: '' };
+    if (!S.lead.name || !S.lead.biz || !/^\S+@\S+\.\S+$/.test(S.lead.email) || !/^\d{4}$/.test(S.lead.pc)) { document.getElementById('lerr').textContent = 'Add your name, business name, a valid email and a 4-digit postcode to continue.'; return; }
+    S.step = 'q'; S.i = 0; render();
+  };
+  if (S.step === 'q') {
+    app.querySelectorAll('input[name=o]').forEach(r => r.onchange = () => {
+      const k = +r.value;
+      if (S.i < Q.length) S.ans[S.i] = k; else S.qual[S.i - Q.length] = k;
+      app.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o.contains(r)));
+      document.getElementById('next').disabled = false;
+      showLive(S.i, k);
+    });
+    const cur0 = S.i < Q.length ? S.ans[S.i] : S.qual[S.i - Q.length];
+    if (cur0 !== null) showLive(S.i, cur0);
+    document.getElementById('back').onclick = () => { const j = prevQ(S.i); if (j < 0) S.step = 'form'; else S.i = j; render(); };
+    document.getElementById('next').onclick = () => { commit(S.i); const j = nextQ(S.i); if (j >= TOTAL) S.step = 'done'; else S.i = j; render(); };
+  }
+  if (S.step === 'done') {
+    document.getElementById('ctaBtn').onclick = e => {
+      e.target.disabled = true;
+      document.getElementById('ctaMsg').textContent = 'Thanks, we’ll be in touch shortly.';
+      sendQueued({ action: 'cta', rid: S.rid, at: new Date().toISOString() });
+    };
+    document.getElementById('again').onclick = () => {
+      S.ans.fill(null); S.qual.fill(null); S.committed.fill(null); S.rid = newRid(); S.sent = false; S.fromReport = false;
+      history.replaceState(null, '', location.pathname + (DEMO ? '?demo=1' : S.mcid ? '?id=' + encodeURIComponent(S.mcid) : ''));
+      S.step = 'intro'; render(); loadCounts().then(updateProof);
+    };
+    if (!S.sent && !S.fromReport) { S.sent = true; submit(); }
+  }
+}
+// ---- Submission ----
+// Failed sends are queued in this browser and retried on the next page load. The respondent is never shown an error.
+const QKEY = 'fhc_queue_v2';
+function readQueue() { try { return JSON.parse(localStorage.getItem(QKEY) || '[]'); } catch (e) { return []; } }
+function writeQueue(q) { try { localStorage.setItem(QKEY, JSON.stringify(q.slice(-20))); } catch (e) { } }
+function sendQueued(body, tries = 3) {
+  if (DEMO) return Promise.resolve(); // demo: never send or queue
+  return post(body).then(d => { if (!d || d.ok !== true) throw new Error('rejected'); }).catch(() => {
+    if (tries > 1 && ENDPOINT) return new Promise(r => setTimeout(r, 1500)).then(() => sendQueued(body, tries - 1));
+    if (ENDPOINT) writeQueue(readQueue().concat([body]));
+  });
+}
+function flushQueue() {
+  const q = readQueue(); if (!q.length || !ENDPOINT || DEMO) return;
+  writeQueue([]);
+  q.forEach(b => sendQueued(b, 1));
+}
+function submit() {
+  const qa = (n, k) => k === null ? '' : (n < Q.length ? Q[n][2][k][0] : QUAL[n - Q.length][1][k]);
+  sendQueued({
+    action: 'submit', rid: S.rid, mcid: S.mcid, src: S.src, at: new Date().toISOString(),
+    lead: S.lead,
+    ans: S.ans, qual: S.qual,
+    ansText: S.ans.map((k, n) => qa(n, k)), qualText: S.qual.map((k, j) => qa(Q.length + j, k)),
+    score: S.calc,
+    report: location.origin + location.pathname + '?r=' + encodeURIComponent(S.rid)
+  });
+}
+
+// ---- Start-up ----
+// ?q1=k pre-selects the answer clicked in the Mailchimp email (0-based option index).
+(function () {
+  const k = parseInt(P.get('q1'), 10);
+  if (Number.isInteger(k) && k >= 0 && k < Q[0][2].length) S.ans[0] = k;
+})();
+// ?r=RID opens a saved report (link in the results email). Falls back to the start page if it can't be loaded.
+const RID = P.get('r');
+function okIdx(arr, len, opts) { return Array.isArray(arr) && arr.length === len && arr.every((k, n) => k === null || (Number.isInteger(k) && k >= 0 && k < opts(n))); }
+if (RID && !DEMO) {
+  app.innerHTML = '<p class="small">Loading your report…</p>';
+  Promise.all([api({ action: 'report', r: RID }), loadCounts()]).then(([d]) => {
+    if (!d || !okIdx(d.ans, Q.length, n => Q[n][2].length) || !okIdx(d.qual, QUAL.length, j => QUAL[j][1].length)) throw new Error('bad report');
+    S.ans = d.ans; S.qual = d.qual; S.rid = RID; S.fromReport = true;
+    S.lead = Object.assign(S.lead, { name: (d.lead && d.lead.name) || '', biz: (d.lead && d.lead.biz) || '' });
+    S.step = 'done'; render();
+  }).catch(() => { S.step = 'intro'; render(); });
+} else {
+  render();
+  loadCounts().then(updateProof);
+  // v6: refresh the start-page count every 60s while it is on screen.
+  if (!DEMO) setInterval(() => { if (S.step === 'intro' && !document.hidden) loadCounts().then(updateProof); }, 60000);
+  if (S.mcid) api({ action: 'prefill', id: S.mcid }).then(d => {
+    if (!d || !d.lead) return;
+    // Only fill blanks, never overwrite what the respondent has already typed.
+    Object.keys(S.lead).forEach(f => { if (!S.lead[f] && typeof d.lead[f] === 'string') S.lead[f] = d.lead[f]; });
+    if (S.step === 'form') render();
+  }).catch(() => { });
+}
+flushQueue();
+</script>
+</body>
+</html>
